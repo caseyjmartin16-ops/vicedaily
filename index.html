@@ -97,6 +97,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--pink)}
 .thumb .rank{position:absolute;left:8px;top:8px;border-radius:7px;padding:2px 8px;font-size:12px;font-weight:700;background:#3a3550}
 .thumb .rank.r1{background:var(--gold);color:#221a00}
 .thumb .cat{position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.6);border-radius:6px;padding:1px 7px;font-size:11px}
+.thumb .gone{position:absolute;inset:0;display:grid;place-items:center;background:rgba(8,7,14,.72);color:var(--muted);font-size:13px;font-weight:600}
 .clip-body{padding:12px;display:grid;gap:8px}
 .clip-body h3{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .clip-body .meta{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);gap:8px}
@@ -234,7 +235,7 @@ const CONFIG = {
   CATEGORIES: ['Chaos', 'Stunts', 'Getaways', 'Cinematic', 'Discoveries'],
   PLATFORMS: ['PS5', 'Xbox Series X|S'],
   MAX_SECONDS: 60,
-  MAX_MB: 50
+  MAX_MB: 25
 };
 const LIVE = !!(CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY);
 
@@ -355,7 +356,7 @@ let sb = null;
 const today = () => new Date().toISOString().slice(0, 10);   // battles run on UTC days
 const mapClip = r => ({ id: r.id, date: r.battle_date, title: r.title, category: r.category, username: r.username, votes: r.votes || 0,
   duration: r.duration, hue: hash(String(r.id)) % 360, created: Date.parse(r.created_at) || 0,
-  videoUrl: r.video_path ? sb.storage.from('clips').getPublicUrl(r.video_path).data.publicUrl : null });
+  expired: !!r.video_expired, videoUrl: r.video_path && !r.video_expired ? sb.storage.from('clips').getPublicUrl(r.video_path).data.publicUrl : null });
 const ok = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
 
 const liveApi = {
@@ -424,7 +425,7 @@ function clipCard(c, rank, myVote) {
     <button class="thumb" data-act="play" data-id="${esc(c.id)}" style="--h:${c.hue}" aria-label="Play ${esc(c.title)}">
       ${c.videoUrl ? `<video src="${esc(c.videoUrl)}#t=0.5" preload="metadata" muted playsinline></video>` : ''}
       ${rank ? `<span class="rank r${rank}">#${rank}</span>` : `<span class="cat">${esc(c.category)}</span>`}
-      <span class="play">▶</span><span class="dur">${dur(c.duration)}</span>
+      ${c.expired ? '<span class="gone">Video expired</span>' : '<span class="play">▶</span>'}<span class="dur">${dur(c.duration)}</span>
     </button>
     <div class="clip-body">
       <h3>${esc(c.title)}</h3>
@@ -514,7 +515,7 @@ async function viewClips() {
 function viewUpload() {
   if (!api.me) return needAccount('Create a free account to enter the Daily Clip Battle.');
   return `<div class="wrap page narrow">
-    <h1>Upload a Clip</h1><p class="lead">One entry per day. Up to ${CONFIG.MAX_SECONDS} seconds and ${CONFIG.MAX_MB} MB. MP4, MOV or WebM.</p>
+    <h1>Upload a Clip</h1><p class="lead">One entry per day. Up to ${CONFIG.MAX_SECONDS} seconds and ${CONFIG.MAX_MB} MB. MP4, MOV or WebM. Only each day's top three clips are kept; other videos are deleted a day after voting ends.</p>
     <form class="panel" data-form="upload">
       <label for="u-title">Clip title</label><input id="u-title" name="title" type="text" maxlength="60" minlength="3" required placeholder="The impossible getaway">
       <label for="u-cat">Category</label><select id="u-cat" name="category">${CONFIG.CATEGORIES.map(c => `<option>${esc(c)}</option>`).join('')}</select>
@@ -605,7 +606,7 @@ function viewRules() {
   return `<div class="wrap page" style="max-width:760px"><h1>Community Guidelines</h1><p class="lead">Short version: post your own clips, vote fairly, be decent.</p>
   <div class="panel prose">
     <h2 style="margin-top:0">How the Daily Clip Battle works</h2>
-    <ul><li>A new battle opens every day at 00:00 UTC and runs for 24 hours.</li><li>Each member can enter one clip per day, up to ${CONFIG.MAX_SECONDS} seconds.</li><li>Each member gets one vote per day and can change it until voting closes. You can't vote for your own clip.</li><li>The clip with the most votes wins. Ties go to the clip that was entered first.</li><li>Winners earn a permanent Clip of the Day badge on their Passport and may be featured on our social channels.</li></ul>
+    <ul><li>A new battle opens every day at 00:00 UTC and runs for 24 hours.</li><li>Each member can enter one clip per day, up to ${CONFIG.MAX_SECONDS} seconds.</li><li>Each member gets one vote per day and can change it until voting closes. You can't vote for your own clip.</li><li>The clip with the most votes wins. Ties go to the clip that was entered first.</li><li>Winners earn a permanent Clip of the Day badge on their Passport and may be featured on our social channels.</li><li>Only each day's top three clips are kept. All other videos are deleted a day after voting ends; titles, votes and points stay on your Passport.</li></ul>
     <h2>What you can post</h2>
     <ul><li>Gameplay footage you captured yourself.</li><li>No other people's clips, stream rips or reposts without the creator's permission.</li><li>No hate, harassment, real-world violence, sexual content, cheats, exploits that harm other players, or spoilers in titles.</li><li>No copyrighted music added on top of your clip.</li></ul>
     <h2>Fair play</h2>
@@ -657,7 +658,7 @@ setInterval(tick, 1000);
 function openPlayer(c) {
   const m = $('#modal');
   m.innerHTML = `<div class="box">
-    ${c.videoUrl ? `<video src="${esc(c.videoUrl)}" controls autoplay playsinline></video>` : `<div class="ph" style="background:linear-gradient(160deg,hsl(${c.hue} 70% 18%),hsl(${(c.hue + 70) % 360} 75% 30%))">Sample entry. Real clips play here once members start uploading.</div>`}
+    ${c.videoUrl ? `<video src="${esc(c.videoUrl)}" controls autoplay playsinline></video>` : `<div class="ph" style="background:linear-gradient(160deg,hsl(${c.hue} 70% 18%),hsl(${(c.hue + 70) % 360} 75% 30%))">${c.expired ? "This video has expired. Only each day's top three clips are kept." : 'Sample entry. Real clips play here once members start uploading.'}</div>`}
     <div class="foot"><div><b>${esc(c.title)}</b><div class="muted">@${esc(c.username)} · ${fmt(c.votes)} votes · ${esc(c.category)}</div></div>
     <div style="display:flex;gap:8px"><button class="btn sm ghost" data-act="report" data-id="${esc(c.id)}">Report</button><button class="btn sm" data-act="close">Close</button></div></div>
   </div>`;
